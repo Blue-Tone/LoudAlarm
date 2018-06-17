@@ -7,6 +7,8 @@
 // ver1.1.5 OK 図形が表示されます。
 
 #define PWM_PIN A0
+#define SENSOR_PIN D2
+#define ALARM_PIN A2
 
 // グラフのデータ
 #define GRAPH_DATA_MAX 128
@@ -22,11 +24,12 @@ enum i_conf {
   I_JUDGE_TIMES,    // 判定時間
   I_LOUD_COUNT_MAX, // 音量超過回数閾値
   I_AVERAGE_MAX,    // 平均閾値
+  I_ALARM_TIME,     // アラーム鳴動時間
   I_CONF_MAX  
 };
 
-int conf[I_CONF_MAX];
-
+int conf[I_CONF_MAX]; // パラメータ保存用配列
+unsigned long alarmTime;   // アラーム発生時間
 
 #include <NefrySetting.h>
 void setting(){
@@ -43,27 +46,35 @@ void setup() {
   NefryDisplay.display();
 
   // パラメータ
-  Nefry.setConfHtmlStr("判定回数",I_JUDGE_TIMES);             // 判定時間
-  Nefry.setConfHtmlStr("音量超過回数閾値",I_LOUD_COUNT_MAX);  // 音量超過回数閾値
-  Nefry.setConfHtmlStr("平均閾値",I_AVERAGE_MAX);             // 平均閾値
+  Nefry.setConfHtmlStr("判定回数",I_JUDGE_TIMES);
+  Nefry.setConfHtmlStr("超過回数",I_LOUD_COUNT_MAX);
+  Nefry.setConfHtmlStr("平均閾値",I_AVERAGE_MAX);
+  Nefry.setConfHtmlStr("鳴動時間",I_ALARM_TIME);
   
   // パラメータ読込み
   for(int i = 0; i < I_CONF_MAX; i++) {
+    // Nefry.setConfStr("1", i); // 初期化処理。0や数字の時にコメントを外して初期化する。その後コメントに戻す。
     conf[i] = Nefry.getConfStr(i).toInt();
+    Serial.println("conf[" +  String(i) + "]=" + String(conf[i]));  
   }
   ledcAttachPin(PWM_PIN, 0);
   ledcSetup(0, 12800, 8);
+
+  pinMode(ALARM_PIN, OUTPUT);
 }
 
 void loop() {
   // LOOP_MAX回計測し、ONになった回数を音量とする。
   int loudness = 0;
   for(int i=0; i<LOOP_MAX; i++){
-    if(!digitalRead(D2)) {
+    bool isLoud = digitalRead(D2);
+    if(!isLoud) {
       loudness++;
     }
    Nefry.ndelay(1);
   }
+  
+  Serial.println("loudness=" + String(loudness));
   if(loudness > THRESHOLD_LOUD_COUNT_LOOP){
     Serial.println("Loud!! " + String(loudness));  
     Nefry.setLed(255, 0, 0);       // 赤
@@ -100,19 +111,22 @@ void loop() {
 
   // 文字表示
   drawString(1, 1, String(loudness));  // 現在値
-  drawString(40, 1, String(average));  // 平均
-  drawString(80, 1, String(loudCount));// 閾値超え
+  drawString(40, 1, String(loudCount));// 閾値超え
+  drawString(80, 1, String(average));  // 平均
 
 
   // 閾値判定
-  if(conf[I_AVERAGE_MAX]    < average  ){
-    Serial.println("average   over!!! " + String(average));
-    drawString(60, 1, "##");  // 平均超え
-  }
   if(conf[I_LOUD_COUNT_MAX] < loudCount){
     Serial.println("loudCount over!!! " + String(loudCount));
-    drawString(100, 1, "##");// 閾値超え
+    drawString(60, 1, "##");// 閾値超え回数超過
+    alarmTime  = millis();
   }
+  if(conf[I_AVERAGE_MAX]    < average  ){
+    Serial.println("average   over!!! " + String(average));
+    drawString(100, 1, "##");  // 平均超え
+    alarmTime  = millis();
+  }
+
   NefryDisplay.display();
   //dacWrite(PWM_PIN, loudness);
   ledcWrite(0, loudness);
@@ -120,6 +134,15 @@ void loop() {
   //delay(500);
   //Nefry.ndelay(500);
 
+  // 時間内ならアラーム
+  if((millis() - alarmTime) < conf[I_ALARM_TIME]){
+    Serial.println("ON!!!");
+    digitalWrite(ALARM_PIN, HIGH);
+  }else{
+    Serial.println("OFF!!!");
+    digitalWrite(ALARM_PIN, LOW);
+  }
+  
 }
 
 void drawString(int x, int y, String str){
